@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8"/>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>診断｜NightType</title>
+  <link rel="stylesheet" href="./style.css"/>
+  <style>
+    .analyzing-overlay{position:fixed;inset:0;z-index:300;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;opacity:0;pointer-events:none;transition:opacity 0.5s;}
+    .analyzing-overlay.show{opacity:1;pointer-events:all;}
+    .analyzing-title{font-family:'Syne',sans-serif;font-weight:800;font-size:1.5rem;background:linear-gradient(135deg,var(--purple-ll),var(--pink-l));-webkit-background-clip:text;-webkit-text-fill-color:transparent;text-align:center;}
+    .analyzing-sub{font-size:0.72rem;color:var(--muted);letter-spacing:0.15em;text-align:center;}
+    .analyzing-bar-wrap{width:240px;height:3px;background:rgba(255,255,255,0.06);border-radius:999px;overflow:hidden;}
+    .analyzing-bar{height:100%;width:0%;background:linear-gradient(90deg,var(--purple),var(--pink));border-radius:999px;transition:width 0.15s;}
+    .analyzing-chars{display:flex;gap:10px;margin-bottom:8px;}
+    .analyzing-chars img{width:48px;height:48px;border-radius:50%;object-fit:cover;border:2px solid var(--border);opacity:0;transform:scale(0.5);transition:all 0.4s cubic-bezier(0.34,1.56,0.64,1);}
+    .analyzing-chars img.show{opacity:1;transform:scale(1);}
+
+    /* 確認ダイアログ */
+    .confirm-overlay{position:fixed;inset:0;z-index:400;background:rgba(0,0,0,0.75);backdrop-filter:blur(12px);display:flex;align-items:flex-end;justify-content:center;opacity:0;pointer-events:none;transition:opacity 0.25s;}
+    .confirm-overlay.show{opacity:1;pointer-events:all;}
+    .confirm-sheet{width:100%;max-width:480px;background:var(--surface);border-radius:24px 24px 0 0;border:1px solid var(--border);border-bottom:none;padding:32px 24px 48px;transform:translateY(100%);transition:transform 0.3s cubic-bezier(0.4,0,0.2,1);}
+    .confirm-overlay.show .confirm-sheet{transform:translateY(0);}
+    .confirm-title{font-family:'Syne',sans-serif;font-weight:800;font-size:1.2rem;margin-bottom:10px;text-align:center;}
+    .confirm-desc{font-size:0.82rem;color:var(--muted);line-height:1.7;text-align:center;margin-bottom:24px;}
+    .confirm-btns{display:flex;flex-direction:column;gap:10px;}
+    .confirm-yes{width:100%;padding:16px;border-radius:14px;border:none;background:linear-gradient(135deg,var(--purple),var(--pink));color:#fff;font-family:'Syne',sans-serif;font-weight:700;font-size:0.85rem;cursor:pointer;transition:all 0.2s;}
+    .confirm-yes:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(124,58,237,0.4);}
+    .confirm-no{width:100%;padding:16px;border-radius:14px;border:1px solid var(--border);background:transparent;color:var(--muted);font-family:'Syne',sans-serif;font-weight:700;font-size:0.85rem;cursor:pointer;transition:all 0.2s;}
+    .confirm-no:hover{border-color:var(--purple-l);color:var(--white);}
+
+    /* 戻るボタン */
+    .btn-back{display:flex;align-items:center;gap:6px;background:none;border:none;color:var(--muted);cursor:pointer;font-family:'Syne',sans-serif;font-size:0.72rem;letter-spacing:0.08em;padding:8px 0;margin-bottom:4px;transition:color 0.2s;}
+    .btn-back:hover{color:var(--purple-ll);}
+    .btn-back:disabled{opacity:0.2;pointer-events:none;}
+
+    /* スワイプヒント */
+    .swipe-hint{display:flex;justify-content:space-between;align-items:center;width:100%;padding:0 4px;margin-top:10px;opacity:0;animation:popIn 0.5s ease 0.8s forwards;}
+    .swipe-hint span{font-size:0.6rem;color:var(--muted);letter-spacing:0.1em;display:flex;align-items:center;gap:4px;}
+
+    /* スワイプ中のカードスタイル */
+    .q-card{touch-action:pan-y;user-select:none;}
+    .q-card.swiping-right{border-color:rgba(168,85,247,0.6)!important;box-shadow:4px 0 24px rgba(124,58,237,0.3)!important;}
+    .q-card.swiping-left{border-color:rgba(236,72,153,0.6)!important;box-shadow:-4px 0 24px rgba(236,72,153,0.3)!important;}
+
+    /* スワイプラベル */
+    .swipe-label{
+      position:absolute;top:16px;padding:6px 14px;border-radius:999px;
+      font-family:'Syne',sans-serif;font-weight:800;font-size:0.9rem;letter-spacing:0.1em;
+      opacity:0;transition:opacity 0.1s;pointer-events:none;
+    }
+    .swipe-label.yes{right:16px;background:rgba(124,58,237,0.25);border:2px solid var(--purple-l);color:var(--purple-ll);}
+    .swipe-label.no{left:16px;background:rgba(236,72,153,0.15);border:2px solid var(--pink);color:var(--pink-l);}
+  </style>
+</head>
+<body>
+
+<!-- 分析ローディング -->
+<div class="analyzing-overlay" id="analyzingOverlay">
+  <div class="analyzing-chars" id="analyzingChars"></div>
+  <div class="analyzing-title">タイプを分析中…</div>
+  <div class="analyzing-sub">あなたの夜の価値観を解析しています</div>
+  <div class="analyzing-bar-wrap"><div class="analyzing-bar" id="analyzingBar"></div></div>
+</div>
+
+<!-- やり直し確認ダイアログ -->
+<div class="confirm-overlay" id="confirmOverlay">
+  <div class="confirm-sheet">
+    <div class="confirm-title">診断をやり直しますか？</div>
+    <div class="confirm-desc">現在の回答がすべてリセットされます。<br>最初からやり直しますか？</div>
+    <div class="confirm-btns">
+      <button class="confirm-yes" id="confirmYes">最初からやり直す</button>
+      <button class="confirm-no"  id="confirmNo">続ける</button>
+    </div>
+  </div>
+</div>
+
+<canvas id="bg-canvas"></canvas>
+<div class="noise"></div>
+<nav class="navbar">
+  <a href="index.html" class="nav-logo">NightType</a>
+  <button class="hamburger" id="hamburger"><span></span><span></span><span></span></button>
+</nav>
+<div class="drawer" id="drawer">
+  <a href="index.html"><span class="icon">🏠</span>ホーム</a>
+  <a href="quiz.html" class="active"><span class="icon">🌙</span>診断する</a>
+  <a href="characters.html"><span class="icon">🎴</span>キャラ一覧</a>
+  <a href="compat.html"><span class="icon">💜</span>相性チェック</a>
+  <a href="matrix.html"><span class="icon">📊</span>相性マトリクス</a>
+</div>
+<div class="drawer-overlay" id="drawer-overlay"></div>
+
+<div class="page">
+  <div class="quiz-wrap">
+
+    <div class="quiz-header">
+      <div class="progress-top">
+        <span>Progress</span>
+        <span class="progress-num" id="progressText">1 / 24</span>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill" style="width:4%"></div>
+      </div>
+    </div>
+
+    <!-- カード（スワイプラベル付き） -->
+    <div class="q-card" id="qCard" style="position:relative">
+      <div class="swipe-label yes" id="labelYes">YES ✓</div>
+      <div class="swipe-label no"  id="labelNo">NO ✗</div>
+      <div class="q-tag" id="qNum">Question 01</div>
+      <p id="question">読み込み中...</p>
+      <div class="q-deco"></div>
+    </div>
+
+    <div class="btn-group">
+      <button class="btn-yes" id="yesBtn">かなり当てはまる</button>
+      <button class="btn-no"  id="noBtn">あまり当てはまらない</button>
+    </div>
+
+    <!-- スワイプヒント -->
+    <div class="swipe-hint">
+      <span>← スワイプ NO</span>
+      <span>YES スワイプ →</span>
+    </div>
+
+    <button class="btn-back" id="backBtn" disabled>← 前の質問に戻る</button>
+
+  </div>
+</div>
+
+<script src="./questions.js"></script>
+<script src="./types.js"></script>
+<script>
+let idx=0;
+const scores={};
+const history=[];
+
+const card    = document.getElementById('qCard');
+const qEl     = document.getElementById('question');
+const qNum    = document.getElementById('qNum');
+const fill    = document.getElementById('progressFill');
+const txt     = document.getElementById('progressText');
+const overlay = document.getElementById('analyzingOverlay');
+const bar     = document.getElementById('analyzingBar');
+const backBtn = document.getElementById('backBtn');
+const labelYes= document.getElementById('labelYes');
+const labelNo = document.getElementById('labelNo');
+
+// 分析画面キャラ
+const aChars=document.getElementById('analyzingChars');
+Object.keys(types).slice(0,5).forEach(k=>{
+  const t=types[k]; if(!t.image)return;
+  const img=document.createElement('img'); img.src=t.image; aChars.appendChild(img);
+});
+
+function pad(n){return n<10?'0'+n:''+n;}
+
+function show(){
+  qEl.textContent=questions[idx].text;
+  qNum.textContent='Question '+pad(idx+1);
+  fill.style.width=Math.max((idx/questions.length)*100,4)+'%';
+  txt.textContent=(idx+1)+' / '+questions.length;
+  backBtn.disabled=idx===0;
+}
+
+function animate(cb){
+  card.classList.add('q-exit');
+  setTimeout(()=>{card.classList.remove('q-exit');cb();card.classList.add('q-enter');setTimeout(()=>card.classList.remove('q-enter'),300);},200);
+}
+
+function answer(val){
+  history.push({type:questions[idx].type,val});
+  scores[questions[idx].type]=(scores[questions[idx].type]||0)+val;
+  idx++;
+  if(idx<questions.length){
+    animate(show);
+    fill.style.width=((idx/questions.length)*100)+'%';
+    txt.textContent=(idx+1)+' / '+questions.length;
+  } else {
+    fill.style.width='100%';
+    localStorage.setItem('nightTypeScores',JSON.stringify(scores));
+    overlay.classList.add('show');
+    const imgs=aChars.querySelectorAll('img');
+    imgs.forEach((im,i)=>setTimeout(()=>im.classList.add('show'),i*180));
+    let p=0;
+    const iv=setInterval(()=>{
+      p=Math.min(p+2,100); bar.style.width=p+'%';
+      if(p>=100){clearInterval(iv);setTimeout(()=>window.location.href='result.html',400);}
+    },30);
+  }
+}
+
+// 戻る
+backBtn.addEventListener('click',()=>{
+  if(idx===0||history.length===0)return;
+  const last=history.pop();
+  idx--;
+  scores[last.type]=(scores[last.type]||0)-last.val;
+  animate(show);
+});
+
+document.getElementById('yesBtn').addEventListener('click',()=>answer(1));
+document.getElementById('noBtn').addEventListener('click',()=>answer(0));
+
+// ── 確認ダイアログ（やり直し）──
+// ハンバーガー or ホームリンクからnavを開いたとき・quiz内で戻ろうとしたとき
+// ここでは「もう一度診断ボタン」から来た場合のみ対応
+// URLに ?restart=1 があればそのままリセット、なければダイアログ
+const params=new URLSearchParams(location.search);
+if(params.get('restart')==='1'){
+  localStorage.removeItem('nightTypeScores');
+}
+
+// ページ離脱前の確認（ブラウザバックなど）
+let answered=false;
+window.addEventListener('beforeunload',e=>{
+  if(idx>0&&!answered&&overlay.style.opacity!=='1'){
+    e.preventDefault(); e.returnValue='';
+  }
+});
+
+// ── 確認overlay ──
+const confirmOverlay=document.getElementById('confirmOverlay');
+document.getElementById('confirmYes').addEventListener('click',()=>{
+  window.location.href='quiz.html?restart=1';
+});
+document.getElementById('confirmNo').addEventListener('click',()=>{
+  confirmOverlay.classList.remove('show');
+});
+// ロゴタップでやり直し確認
+document.querySelector('.nav-logo').addEventListener('click',e=>{
+  if(idx>0){e.preventDefault();confirmOverlay.classList.add('show');}
+});
+
+// ── スワイプ操作 ──
+let startX=0, startY=0, isDragging=false, currentX=0;
+const THRESHOLD=80; // スワイプ判定距離(px)
+
+card.addEventListener('touchstart',e=>{
+  startX=e.touches[0].clientX;
+  startY=e.touches[0].clientY;
+  isDragging=true;
+  currentX=0;
+},{passive:true});
+
+card.addEventListener('touchmove',e=>{
+  if(!isDragging)return;
+  const dx=e.touches[0].clientX-startX;
+  const dy=e.touches[0].clientY-startY;
+  // 縦スクロールの場合は無視
+  if(Math.abs(dy)>Math.abs(dx)*1.5){isDragging=false;return;}
+  currentX=dx;
+  const ratio=Math.min(Math.abs(dx)/THRESHOLD,1);
+  card.style.transform=`translateX(${dx*0.4}px) rotate(${dx*0.03}deg)`;
+  if(dx>20){
+    card.classList.add('swiping-right'); card.classList.remove('swiping-left');
+    labelYes.style.opacity=ratio;labelNo.style.opacity=0;
+  } else if(dx<-20){
+    card.classList.add('swiping-left'); card.classList.remove('swiping-right');
+    labelNo.style.opacity=ratio;labelYes.style.opacity=0;
+  } else {
+    card.classList.remove('swiping-right','swiping-left');
+    labelYes.style.opacity=0;labelNo.style.opacity=0;
+  }
+},{passive:true});
+
+card.addEventListener('touchend',()=>{
+  if(!isDragging)return;
+  isDragging=false;
+  card.style.transform='';
+  card.classList.remove('swiping-right','swiping-left');
+  labelYes.style.opacity=0; labelNo.style.opacity=0;
+  if(currentX>THRESHOLD){
+    // 右スワイプ = YES
+    card.style.transition='transform 0.3s ease, opacity 0.3s';
+    card.style.transform=`translateX(120%) rotate(15deg)`;
+    card.style.opacity='0';
+    setTimeout(()=>{card.style.transition='';card.style.transform='';card.style.opacity='';answer(1);},280);
+  } else if(currentX<-THRESHOLD){
+    // 左スワイプ = NO
+    card.style.transition='transform 0.3s ease, opacity 0.3s';
+    card.style.transform=`translateX(-120%) rotate(-15deg)`;
+    card.style.opacity='0';
+    setTimeout(()=>{card.style.transition='';card.style.transform='';card.style.opacity='';answer(0);},280);
+  }
+});
+
+// マウスでもスワイプ（PC対応）
+card.addEventListener('mousedown',e=>{
+  startX=e.clientX; isDragging=true; currentX=0;
+  card.style.cursor='grabbing';
+});
+window.addEventListener('mousemove',e=>{
+  if(!isDragging)return;
+  const dx=e.clientX-startX; currentX=dx;
+  const ratio=Math.min(Math.abs(dx)/THRESHOLD,1);
+  card.style.transform=`translateX(${dx*0.4}px) rotate(${dx*0.03}deg)`;
+  if(dx>20){card.classList.add('swiping-right');card.classList.remove('swiping-left');labelYes.style.opacity=ratio;labelNo.style.opacity=0;}
+  else if(dx<-20){card.classList.add('swiping-left');card.classList.remove('swiping-right');labelNo.style.opacity=ratio;labelYes.style.opacity=0;}
+  else{card.classList.remove('swiping-right','swiping-left');labelYes.style.opacity=0;labelNo.style.opacity=0;}
+});
+window.addEventListener('mouseup',()=>{
+  if(!isDragging)return; isDragging=false;
+  card.style.cursor=''; card.classList.remove('swiping-right','swiping-left');
+  labelYes.style.opacity=0; labelNo.style.opacity=0;
+  card.style.transform='';
+  if(currentX>THRESHOLD){
+    card.style.transition='transform 0.3s ease,opacity 0.3s';card.style.transform=`translateX(120%) rotate(15deg)`;card.style.opacity='0';
+    setTimeout(()=>{card.style.transition='';card.style.transform='';card.style.opacity='';answer(1);},280);
+  } else if(currentX<-THRESHOLD){
+    card.style.transition='transform 0.3s ease,opacity 0.3s';card.style.transform=`translateX(-120%) rotate(-15deg)`;card.style.opacity='0';
+    setTimeout(()=>{card.style.transition='';card.style.transform='';card.style.opacity='';answer(0);},280);
+  }
+});
+
+show();
+</script>
+<script src="./common.js"></script>
+</body>
+</html>
